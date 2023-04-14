@@ -4,10 +4,12 @@
 #include <Arduino.h>
 #include "BLE2902.h"
 
+// Definicija unikatnega identifikatorja NUS storitve
 #define SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
+// Spremenljivke
 BLEDevice *pAdvertising;
 BLEServer *pServer;
 BLEService *pService;
@@ -25,12 +27,15 @@ SemaphoreHandle_t distanceVarMutex;
 /* Forward function definitions*/
 void process_serial(char *receivedString, uint16_t len);
 /*end functions definitions
-*/
+ */
+
+// Funkcija za  lovljenje dogodkov na BLE povezavi
 class MyCallbacks : public BLEServerCallbacks
 {
   void onConnect(BLEServer *pServer)
   {
     connected = 1;
+    subscribed = 0;
     Serial.println("Connected!");
   }
   void onDisconnect(BLEServer *pServer)
@@ -41,7 +46,7 @@ class MyCallbacks : public BLEServerCallbacks
     BLEDevice::startAdvertising();
   }
 };
-
+// Funkcija za  lovljenje dogodkov na TX značilnosti
 class NusTxCallbacks : public BLECharacteristicCallbacks
 {
   void onNotify(BLECharacteristic *pCharacteristic_TX)
@@ -53,25 +58,23 @@ class NusTxCallbacks : public BLECharacteristicCallbacks
   {
     Serial.println("on status tx");
   }
-  void onRead(BLECharacteristic* pCharacteristic)
+  void onRead(BLECharacteristic *pCharacteristic)
   {
     Serial.println("On read");
   }
-
 };
-
+// Funkcija za  lovljenje dogodkov na RX značilnosti
 class NusRxCallbacks : public BLECharacteristicCallbacks
 {
   void onWrite(BLECharacteristic *pCharacteristic_RX)
   {
     char dataString[100];
-    Serial.println("Writing happend");
+    Serial.println("Writing happened");
     uint32_t len = pCharacteristic_RX->getLength();
     uint8_t *p = pCharacteristic_RX->getData();
-    strncpy(dataString,(char*)p,len);
-    Serial.printf("Length %d, %s\r\n", len,dataString);
-    process_serial(dataString,len);
-
+    strncpy(dataString, (char *)p, len);
+    Serial.printf("Length %d, %s\r\n", len, dataString);
+    process_serial(dataString, len);
   }
   void onStatus(BLECharacteristic *pCharacteristic_RX, Status s, uint32_t code)
   {
@@ -79,6 +82,7 @@ class NusRxCallbacks : public BLECharacteristicCallbacks
   }
 };
 
+// Funkcija za testiranje preko serijskih komand
 void process_serial(char *receivedString, uint16_t len)
 {
   char responseString[100];
@@ -110,21 +114,21 @@ void setup()
   Serial.begin(115200);
   Serial.println("Starting BLE work!");
 
-  distanceVarMutex = xSemaphoreCreateMutex();
+  distanceVarMutex = xSemaphoreCreateMutex(); // Ustvari mutex za varno branje spremenljivke
 
-  BLEDevice::init("BLE_SRVR");
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyCallbacks());
-  pService = pServer->createService(SERVICE_UUID);
-  pCharacteristic_TX = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);
-  pCharacteristic_RX = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  BLEDevice::init("BLE_SRVR");                                                                                                                           // Inicializiraj moj BLE server in ga poimenuj
+  pServer = BLEDevice::createServer();                                                                                                                   // Ustvari server
+  pServer->setCallbacks(new MyCallbacks());                                                                                                              // Nastavi funkcije ki lovijo dogodke za povezavo
+  pService = pServer->createService(SERVICE_UUID);                                                                                                       // Ustvari storitev ki bo na BLE serverju
+  pCharacteristic_TX = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);                                       // Nastavi značilnost storitve pošiljanja podatkov
+  pCharacteristic_RX = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR); // Nastavi značilnost storitve prejemanja podatkov
   pCharacteristic_TX->addDescriptor(new BLE2902());
-  pCharacteristic_TX->setCallbacks(new NusTxCallbacks());
-  pCharacteristic_RX->setCallbacks(new NusRxCallbacks());
+  pCharacteristic_TX->setCallbacks(new NusTxCallbacks()); // Nastavi funkcije ki lovijo dogodke na storitvi oddajanja podatkov
+  pCharacteristic_RX->setCallbacks(new NusRxCallbacks()); // Nastavi funkcije ki lovijo dogodke na storitvi prejemanja podatkov
 
-  // pCharacteristic->setValue("Hello World says Neil");
-  pService->start();
-  // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
+  pService->start(); // Zaženi storitev
+
+  // Nastavi parametre oglaševanja in začni oglaševanje
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
@@ -136,6 +140,7 @@ void setup()
 void loop()
 {
 
+  // Sprejemanje serijskih komand preko serijskega porta za namen testiranja
   while (Serial.available())
   {
     receivedString[serialRecLen] = (char)Serial.read();
@@ -155,20 +160,21 @@ void loop()
     }
   }
 
+  // Funkcija ki se požene vsako sekundo in pošlje podatke če ima naprava vzpostavljeno povezavo
   if (currMillis - prevMillis > 1000)
   {
     prevMillis = currMillis;
 
     if (connected)
     {
+      // Izmeri razdaljo in pošlji
       char buf[20];
       testVar = rand() % (65 + 1 - 0) + 0;
-      sprintf(buf,"Var:%d\r\n",testVar);
-      pCharacteristic_TX->setValue("2");
-      Serial.println("Beep");
+      sprintf(buf, "Var:%d\r\n", testVar);
+      pCharacteristic_TX->setValue(buf);
+      Serial.println("Podatki poslani");
     }
   }
-
 
   currMillis = millis();
 }
