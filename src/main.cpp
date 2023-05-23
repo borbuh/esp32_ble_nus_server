@@ -18,6 +18,7 @@ BLECharacteristic *pCharacteristic_RX;
 int connected = 0;
 int connCount = 0;
 int subscribed = 0;
+int enabled = 0;
 char receivedString[1024];
 uint16_t serialRecLen = 0;
 uint16_t testVar = 0;
@@ -52,7 +53,6 @@ class NusTxCallbacks : public BLECharacteristicCallbacks
   void onNotify(BLECharacteristic *pCharacteristic_TX)
   {
     Serial.println("Notify");
-    subscribed = 1;
   }
   void onStatus(BLECharacteristic *pCharacteristic_TX, Status s, uint32_t code)
   {
@@ -82,6 +82,26 @@ class NusRxCallbacks : public BLECharacteristicCallbacks
   }
 };
 
+class SubscribeCallbacks : public BLEDescriptorCallbacks
+{
+public:
+  void onWrite(BLEDescriptor *pDescriptor);
+} subscribeCallback;
+
+void SubscribeCallbacks::onWrite(BLEDescriptor *pDescriptor)
+{
+  if (subscribed)
+  {
+    subscribed = 0;
+    enabled = 0;
+  }
+  else
+  {
+    subscribed = 1;
+  }
+  Serial.printf("On write in subscribe callbacks %d \r\n", subscribed);
+}
+
 // Funkcija za testiranje preko serijskih komand
 void process_serial(char *receivedString, uint16_t len)
 {
@@ -91,6 +111,28 @@ void process_serial(char *receivedString, uint16_t len)
   if (strncmp((char *)receivedString, "PING", 4) == 0)
   {
     Serial.println("PONG");
+    char buf[20];
+    sprintf(buf, "PONG");
+    pCharacteristic_TX->setValue(buf);
+    pCharacteristic_TX->notify();
+  }
+  if (strncmp((char *)receivedString, "ENABLE", 6) == 0)
+  {
+    enabled = 1;
+    Serial.println("ENABLED");
+    char buf[20];
+    sprintf(buf, "ENABLE");
+    pCharacteristic_TX->setValue(buf);
+    pCharacteristic_TX->notify();
+  }
+  if (strncmp((char *)receivedString, "DISABLED", 7) == 0)
+  {
+    enabled = 0;
+    Serial.println("DISABLED");
+    char buf[20];
+    sprintf(buf, "DISABLED");
+    pCharacteristic_TX->setValue(buf);
+    pCharacteristic_TX->notify();
   }
 
   if (strncmp((char *)receivedString, "VAR ", 4) == 0) // set variable to selected value
@@ -120,10 +162,12 @@ void setup()
   pServer = BLEDevice::createServer();                                                                                                                   // Ustvari server
   pServer->setCallbacks(new MyCallbacks());                                                                                                              // Nastavi funkcije ki lovijo dogodke za povezavo
   pService = pServer->createService(SERVICE_UUID);                                                                                                       // Ustvari storitev ki bo na BLE serverju
-  pCharacteristic_TX = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);                                       // Nastavi značilnost storitve pošiljanja podatkov
+  pCharacteristic_TX = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);    // Nastavi značilnost storitve pošiljanja podatkov
   pCharacteristic_RX = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR); // Nastavi značilnost storitve prejemanja podatkov
-  pCharacteristic_TX->addDescriptor(new BLE2902());
-  pCharacteristic_TX->setCallbacks(new NusTxCallbacks()); // Nastavi funkcije ki lovijo dogodke na storitvi oddajanja podatkov
+  BLEDescriptor *pCCCD = new BLE2902();
+  pCCCD->setCallbacks(&subscribeCallback);
+  pCharacteristic_TX->addDescriptor(pCCCD);
+  // pCharacteristic_TX->setCallbacks(new NusTxCallbacks()); // Nastavi funkcije ki lovijo dogodke na storitvi oddajanja podatkov
   pCharacteristic_RX->setCallbacks(new NusRxCallbacks()); // Nastavi funkcije ki lovijo dogodke na storitvi prejemanja podatkov
 
   pService->start(); // Zaženi storitev
@@ -165,13 +209,14 @@ void loop()
   {
     prevMillis = currMillis;
 
-    if (connected)
+    if (connected && subscribed && enabled)
     {
       // Izmeri razdaljo in pošlji
       char buf[20];
       testVar = rand() % (65 + 1 - 0) + 0;
-      sprintf(buf, "Var:%d\r\n", testVar);
+      sprintf(buf, "Var = %d", testVar);
       pCharacteristic_TX->setValue(buf);
+      pCharacteristic_TX->notify();
       Serial.println("Podatki poslani");
     }
   }
